@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jellyport — Move Plex playlists to Jellyfin</title>
+<meta name="description" content="Free, open-source Windows app to copy your Plex playlists to Jellyfin with drag and drop. Smart matching, preview before copying, works with Docker and NAS setups.">
+<meta property="og:title" content="Jellyport — Move Plex playlists to Jellyfin">
+<meta property="og:description" content="Drag and drop your Plex playlists into Jellyfin. Free and open source.">
+<meta property="og:image" content="https://BintChar247.github.io/jellyport/screenshot.png">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fbfaf7; --surface: #ffffff; --text: #1d1b22; --muted: #5d5a66;
+    --line: #e7e3ea; --accent: #6e46c8; --accent-2: #e5a00d; --accent-text: #ffffff;
+    --code: #f2eff6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121016; --surface: #1b1820; --text: #eeeaf3; --muted: #a7a1b2;
+      --line: #2c2834; --accent: #9b7bff; --accent-2: #f2b632; --accent-text: #120f18;
+      --code: #24202b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121016; --surface: #1b1820; --text: #eeeaf3; --muted: #a7a1b2;
+    --line: #2c2834; --accent: #9b7bff; --accent-2: #f2b632; --accent-text: #120f18;
+    --code: #24202b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px;
+           color: var(--text); text-decoration: none; }
+  .brand img { width: 32px; height: 32px; }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 20px; font-weight: 500; }
+  nav a:hover { color: var(--text); }
+  .hero { text-align: center; padding: 48px 0 32px; }
+  .hero h1 { font-size: clamp(32px, 6vw, 56px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+  .hero h1 span { background: linear-gradient(90deg, var(--accent-2), var(--accent));
+                  -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { color: var(--muted); font-size: 19px; max-width: 620px; margin: 0 auto 28px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 12px 22px; border-radius: 10px; font-weight: 600;
+         text-decoration: none; border: 1px solid var(--line); color: var(--text); background: var(--surface); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .small { color: var(--muted); font-size: 14px; margin-top: 12px; }
+  .shot { margin: 40px auto 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+          box-shadow: 0 20px 60px rgba(40, 20, 80, .18); max-width: 960px; }
+  .shot img { display: block; width: 100%; height: auto; }
+  section { padding: 56px 0; }
+  h2 { font-size: 28px; margin: 0 0 24px; letter-spacing: -0.01em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .ico { font-size: 22px; margin-bottom: 8px; }
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  ol.steps li { counter-increment: s; background: var(--surface); border: 1px solid var(--line);
+                border-radius: 12px; padding: 16px 16px 16px 60px; position: relative; }
+  ol.steps li::before { content: counter(s); position: absolute; left: 16px; top: 14px; width: 30px; height: 30px;
+                        border-radius: 50%; background: var(--accent); color: var(--accent-text);
+                        display: grid; place-items: center; font-weight: 700; }
+  code { background: var(--code); padding: 2px 6px; border-radius: 5px; font-size: 14px; }
+  details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+            padding: 14px 18px; margin-bottom: 10px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details p { color: var(--muted); margin: 10px 0 0; }
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 560px) { nav a:not(:last-child) { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="#"><img src="icon.png" alt="">Jellyport</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/BintChar247/jellyport">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>Move your Plex playlists<br>to <span>Jellyfin</span></h1>
+    <p>Switching to Jellyfin? Jellyport puts your Plex playlists next to your Jellyfin ones. Drag over what you want, check it, and copy. Free and open source.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/BintChar247/jellyport/releases/latest">⬇ Download for Windows</a>
+      <a class="btn" href="https://github.com/BintChar247/jellyport">View on GitHub</a>
+    </div>
+    <div class="small">Windows 10 / 11 · ~10 MB · no admin rights needed · also runs from Python on macOS and Linux</div>
+    <div class="shot"><img src="screenshot.png" alt="Jellyport: Plex playlists on the left, Jellyfin playlists on the right, with pending items shown in green"></div>
+  </div>
+
+  <section id="features">
+    <h2>Why Jellyport</h2>
+    <div class="grid">
+      <div class="card"><div class="ico">🖱️</div><h3>Drag and drop</h3><p>Drag single movies, a selection, or whole playlists from Plex into any Jellyfin playlist.</p></div>
+      <div class="card"><div class="ico">👀</div><h3>Preview first</h3><p>New items show in green and missing ones in red. Nothing changes until you click Copy.</p></div>
+      <div class="card"><div class="ico">🎯</div><h3>Smart matching</h3><p>Movies are matched by file path, IMDb, TMDb or TVDb ID, or title and year.</p></div>
+      <div class="card"><div class="ico">🐳</div><h3>Docker and NAS friendly</h3><p>Path mappings handle Jellyfin in a container on Synology, Unraid or QNAP.</p></div>
+      <div class="card"><div class="ico">🔁</div><h3>Safe to re-run</h3><p>Movies that are already in a playlist are skipped, so you never get duplicates.</p></div>
+      <div class="card"><div class="ico">🔒</div><h3>Stays on your network</h3><p>It talks only to your own servers. No accounts, no cloud, no tracking.</p></div>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li><b>Install and connect.</b> Enter your Plex token and a Jellyfin API key. The app shows where to find each.</li>
+      <li><b>Browse.</b> Your Plex playlists and libraries appear on the left, and your Jellyfin playlists on the right.</li>
+      <li><b>Drag.</b> Drop movies onto a playlist, or drop a whole Plex playlist onto empty space to recreate it.</li>
+      <li><b>Copy.</b> Check the green items and click <b>Copy to Jellyfin</b>.</li>
+    </ol>
+  </section>
+
+  <section id="faq">
+    <h2>FAQ</h2>
+    <details><summary>Is it free?</summary><p>Yes. It's MIT-licensed open source. If it saves you time, a star on GitHub is appreciated.</p></details>
+    <details><summary>Windows says "Windows protected your PC"</summary><p>The installer isn't code-signed yet. Click <b>More info → Run anyway</b>, or build it yourself from the source on GitHub.</p></details>
+    <details><summary>Some movies show "not in Jellyfin"</summary><p>Make sure Jellyfin has scanned and identified them. If Plex and Jellyfin see your NAS folders under different paths, add a path mapping in Settings, e.g. <code>/volume1/video/Movies =&gt; /media/movies</code>.</p></details>
+    <details><summary>Does it change anything in Plex?</summary><p>No. Jellyport only reads from Plex. It writes only to Jellyfin, and only when you click Copy.</p></details>
+    <details><summary>Music playlists? TV shows? macOS?</summary><p>Video playlists, including TV episodes inside them, are supported. Music is on the roadmap. On macOS and Linux, run <code>python jellyport.py</code>. It needs only Python 3.</p></details>
+  </section>
+
+  <footer>
+    Jellyport is MIT-licensed and isn't affiliated with Plex Inc. or the Jellyfin project. ·
+    <a href="https://github.com/BintChar247/jellyport/issues">Report an issue</a>
+  </footer>
+</div>
+</body>
+</html>

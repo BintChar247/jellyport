@@ -1,0 +1,16 @@
+{
+  "plex": {
+    "url": "http://192.168.1.10:32400",
+    "token": "YOUR_PLEX_TOKEN",
+    "verify_ssl": true
+  },
+  "jellyfin": {
+    "url": "http://192.168.1.10:8096",
+    "api_key": "YOUR_JELLYFIN_API_KEY",
+    "user": "YOUR_JELLYFIN_USERNAME",
+    "verify_ssl": true
+  },
+  "path_mappings": [
+    { "plex": "/volume1/video/Movies", "jellyfin": "/media/movies" }
+  ]
+}
