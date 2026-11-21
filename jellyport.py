@@ -223,6 +223,8 @@ class App:
         top.pack(fill="x")
         ttk.Button(top, text="⚙ Settings…", command=self.open_settings).pack(side="left")
         ttk.Button(top, text="⟳ Connect / Refresh", command=self.connect).pack(side="left", padx=6)
+        ttk.Button(top, text="🔎 Title Finder…", command=self.open_title_finder).pack(side="left")
+        ttk.Button(top, text="⇄ Sync playlists…", command=self.open_sync).pack(side="left", padx=6)
         self.prog = ttk.Progressbar(top, mode="indeterminate", length=140)
         self.prog.pack(side="right")
         self.status = tk.StringVar(value="Not connected")
@@ -363,6 +365,31 @@ class App:
         self.root.after(100, self._poll)
 
     # ------------------------------------------------------------ settings --
+    def open_sync(self):
+        """Compare same-named playlists and copy missing entries either way."""
+        if not self.jf or not self.plex:
+            messagebox.showinfo("Sync playlists", "Connect to Plex and Jellyfin first.")
+            return
+        win = getattr(self, "_sync_win", None)
+        if win is not None and win.winfo_exists():
+            win.deiconify()
+            win.lift()
+            return
+        import sync_window
+        self._sync_win = tk.Toplevel(self.root)
+        sync_window.SyncWindow(self._sync_win, self)
+
+    def open_title_finder(self):
+        """Search / group / export titles from either server (separate window)."""
+        win = getattr(self, "_tf_win", None)
+        if win is not None and win.winfo_exists():
+            win.deiconify()
+            win.lift()
+            return
+        import title_finder  # local import: title_finder imports this module
+        self._tf_win = tk.Toplevel(self.root)
+        title_finder.TitleFinder(self._tf_win, self.cfg)
+
     def open_settings(self):
         SettingsDialog(self.root, self.cfg, self.connect)
 

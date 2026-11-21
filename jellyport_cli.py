@@ -19,7 +19,7 @@ Usage:
   python jellyport_cli.py --replace               # rebuild existing playlists
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import argparse
 import json
@@ -171,18 +171,52 @@ class Plex:
             if not batch or start >= total:
                 return items
 
+    def machine_id(self):
+        if not getattr(self, "_mid", None):
+            data = self.http.get("/identity")
+            self._mid = data["MediaContainer"]["machineIdentifier"]
+        return self._mid
+
+    def _uri(self, keys):
+        return (f"server://{self.machine_id()}/com.plexapp.plugins.library"
+                f"/library/metadata/{','.join(str(k) for k in keys)}")
+
+    def create_playlist(self, title, keys):
+        """Create a normal (non-smart) video playlist; returns its ratingKey."""
+        data = self.http.request("POST", "/playlists", {
+            "type": "video", "title": title, "smart": 0, "uri": self._uri(keys[:50])})
+        rk = data["MediaContainer"]["Metadata"][0]["ratingKey"]
+        if len(keys) > 50:
+            self.add_to_playlist(rk, keys[50:])
+        return rk
+
+    def add_to_playlist(self, rating_key, keys):
+        for i in range(0, len(keys), 50):   # keep the URI short
+            self.http.request("PUT", f"/playlists/{rating_key}/items",
+                              {"uri": self._uri(keys[i:i + 50])})
+
+    def library_index(self):
+        """Every movie and TV episode, for matching Jellyfin items back to Plex."""
+        out = []
+        for sec in self.sections():
+            if sec.get("type") == "movie":
+                out += self.section_items(sec["key"], 1)
+            elif sec.get("type") == "show":
+                out += self.section_items(sec["key"], 4)
+        return out
+
     def sections(self):
         data = self.http.get("/library/sections")
         return data["MediaContainer"].get("Directory", []) or []
 
-    def section_items(self, key):
-        """All movies in a library section."""
+    def section_items(self, key, plex_type=1):
+        """All items in a library section (type 1 = movies, 2 = TV shows)."""
         items, start = [], 0
         while True:
             data = self.http.get(
                 f"/library/sections/{key}/all",
                 {
-                    "type": 1,
+                    "type": plex_type,
                     "includeGuids": 1,
                     "X-Plex-Container-Start": start,
                     "X-Plex-Container-Size": PAGE_SIZE,
@@ -245,9 +279,24 @@ class Jellyfin:
     def playlists(self):
         return self._paged_items({"Recursive": "true", "IncludeItemTypes": "Playlist"})
 
+    def views(self):
+        """The user's top-level libraries (Movies, Shows, ...)."""
+        data = self.http.get(f"/Users/{self.user_id}/Views")
+        return (data or {}).get("Items", [])
+
+    def view_items(self, view_id, types="Movie,Series,Video,MusicVideo"):
+        """All titles inside one library."""
+        return self._paged_items({
+            "ParentId": view_id,
+            "Recursive": "true",
+            "IncludeItemTypes": types,
+            "Fields": "Path,ProductionYear,SortName",
+        })
+
     def playlist_items(self, playlist_id):
         data = self.http.get(f"/Playlists/{playlist_id}/Items",
-                             {"userId": self.user_id, "Fields": "ProductionYear"})
+                             {"userId": self.user_id,
+                              "Fields": "ProductionYear,Path,ProviderIds,MediaSources"})
         return (data or {}).get("Items", [])
 
     def playlist_item_ids(self, playlist_id):
@@ -319,6 +368,116 @@ class Matcher:
             if len(cands) == 1:
                 return cands[0], "filename"
         return None, None
+
+
+def jf_files(it):
+    paths = {it.get("Path")}
+    for ms in it.get("MediaSources") or []:
+        paths.add(ms.get("Path"))
+    return [p for p in paths if p]
+
+
+class PlexMatcher:
+    """Finds the Plex item for a Jellyfin item (the reverse of Matcher)."""
+
+    def __init__(self, plex_items, mappings):
+        # path_mappings are written Plex => Jellyfin; flip them for this direction
+        self.mappings = [{"plex": m["jellyfin"], "jellyfin": m["plex"]} for m in mappings]
+        self.by_path, self.by_file, self.by_guid, self.by_title = {}, {}, {}, {}
+        for px in plex_items:
+            for media in px.get("Media", []) or []:
+                for part in media.get("Part", []) or []:
+                    f = part.get("file")
+                    if f:
+                        self.by_path.setdefault(norm_path(f), px)
+                        self.by_file.setdefault(basename(f), []).append(px)
+            for k, v in plex_guids(px).items():
+                self.by_guid.setdefault((k, v), px)
+            if px.get("type") == "movie":
+                self.by_title.setdefault((norm_title(px.get("title")), px.get("year")), px)
+
+    def match(self, it):
+        files = jf_files(it)
+        for f in files:
+            hit = self.by_path.get(apply_mappings(f, self.mappings))
+            if hit:
+                return hit, "path"
+        for k, v in (it.get("ProviderIds") or {}).items():
+            hit = self.by_guid.get((k.lower(), str(v).lower()))
+            if hit:
+                return hit, k.lower()
+        if it.get("Type") == "Movie":
+            y = it.get("ProductionYear")
+            t = norm_title(it.get("Name"))
+            for year in (y, (y or 0) - 1, (y or 0) + 1):
+                hit = self.by_title.get((t, year))
+                if hit:
+                    return hit, "title"
+        for f in files:
+            cands = self.by_file.get(basename(f), [])
+            if len(cands) == 1:
+                return cands[0], "filename"
+        return None, None
+
+
+def jf_describe(it):
+    if it.get("Type") == "Episode":
+        return (f'{it.get("SeriesName", "")} S{it.get("ParentIndexNumber") or 0:02d}'
+                f'E{it.get("IndexNumber") or 0:02d} - {it.get("Name", "")}')
+    return f'{it.get("Name", "?")} ({it.get("ProductionYear", "?")})'
+
+
+def plan_sync(plex, jf, to_jf_matcher, to_plex_matcher, name, plex_pl, jf_pl, direction):
+    """Work out what one playlist pair needs. Never removes anything.
+
+    direction: "to_plex", "to_jf" or "both". plex_pl / jf_pl may be None (missing).
+    Returns a dict the caller can show and later pass to apply_sync().
+    """
+    p_items = plex.playlist_items(plex_pl["ratingKey"]) if plex_pl else []
+    j_items = jf.playlist_items(jf_pl["Id"]) if jf_pl else []
+    p_keys = {str(x["ratingKey"]) for x in p_items}
+    j_ids = {x["Id"] for x in j_items}
+    plan = {"name": name, "plex_pl": plex_pl, "jf_pl": jf_pl,
+            "plex_count": len(p_items), "jf_count": len(j_items),
+            "add_plex": [], "add_jf": [], "missing": []}
+    if direction in ("to_plex", "both"):
+        seen = set()
+        for it in j_items:
+            hit, _ = to_plex_matcher.match(it)
+            if not hit:
+                plan["missing"].append(("Plex", jf_describe(it)))
+            elif str(hit["ratingKey"]) not in p_keys and hit["ratingKey"] not in seen:
+                seen.add(hit["ratingKey"])
+                plan["add_plex"].append(hit)
+    if direction in ("to_jf", "both"):
+        seen = set()
+        for px in p_items:
+            hit, _ = to_jf_matcher.match(px)
+            if not hit:
+                plan["missing"].append(("Jellyfin", describe(px)))
+            elif hit["Id"] not in j_ids and hit["Id"] not in seen:
+                seen.add(hit["Id"])
+                plan["add_jf"].append(hit)
+    return plan
+
+
+def apply_sync(plex, jf, plan):
+    """Carry out a plan from plan_sync(). Creates playlists that don't exist yet."""
+    keys = [x["ratingKey"] for x in plan["add_plex"]]
+    if keys:
+        if plan["plex_pl"]:
+            plex.add_to_playlist(plan["plex_pl"]["ratingKey"], keys)
+        else:
+            plex.create_playlist(plan["name"], keys)
+    ids = [x["Id"] for x in plan["add_jf"]]
+    if ids:
+        if plan["jf_pl"]:
+            jf.add_to_playlist(plan["jf_pl"]["Id"], ids)
+        else:
+            res = jf.create_playlist(plan["name"], ids[:100])
+            if len(ids) > 100:
+                jf.add_to_playlist(res["Id"], ids[100:])
+    return len(keys), len(ids)
 
 
 def describe(px):

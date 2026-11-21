@@ -46,6 +46,17 @@ so you can pick exactly what you want and drag it over.
 - **A command-line version is included** for copying everything in one go or running
   it on a schedule.
 
+### New in 1.1
+
+- **⇄ Sync playlists, in either direction.** Compare same-named playlists on both
+  servers and copy the missing entries **Jellyfin → Plex**, **Plex → Jellyfin**, or
+  **both ways**. Playlists that exist on only one side are created on the other.
+  Sync only ever adds entries; it never removes anything.
+- **🔎 Title Finder.** Search all your Plex or Jellyfin libraries by how titles start,
+  contain or end, or with a regex. A **Code (ABC-123)** mode finds titles that begin
+  with a letter code followed by a number. **Group by prefix** lists every first-N-letter
+  prefix with a count, and results export to CSV (opens in Excel) or the clipboard.
+
 ## Install
 
 1. Download **`Jellyport-Setup-x.y.z.exe`** from the
@@ -103,6 +114,32 @@ and year.
      the same name.
    - Use **＋ New playlist…** to start an empty playlist.
 4. Check the green (pending) and red (not found) rows, then click **Copy to Jellyfin**.
+
+### Sync playlists
+
+1. Click **⇄ Sync playlists…** in the toolbar. The first comparison reads your Plex
+   library, which can take a few seconds.
+2. Choose **Jellyfin → Plex**, **Plex → Jellyfin** or **Both ways**.
+3. Each playlist pair shows how many entries are on each side, how many will be added,
+   and how many can't be matched. Double-click a row to see the unmatched entries.
+4. Playlists that need changes are ticked. Click a row to untick it, then click
+   **Sync ticked playlists**.
+
+Plex *smart* playlists can be read but not added to, so they're skipped as a target.
+Running sync again only adds what's new.
+
+### Title Finder
+
+1. Click **🔎 Title Finder…** in the toolbar.
+2. Pick a server and a library (or **All libraries**). Titles load automatically.
+3. Type in **Find** and choose **Starts with**, **Code (ABC-123)**, **Contains**,
+   **Ends with** or **Regex**. You can search the title or the file name.
+4. Use **Group by prefix** to see every prefix with its count, and click one to list its
+   titles.
+5. Click **Export CSV…** or **Copy titles**. If you select rows first, only those are
+   exported.
+
+Title Finder only reads from your servers.
 
 ## Command line
 
@@ -165,6 +202,8 @@ The installer is written to `dist\`.
 - The left side lists movie libraries. TV episodes that are already in a Plex playlist
   still copy.
 - Plex smart playlists are copied as a snapshot. Jellyfin has no smart playlists.
+- Sync adds entries but never removes them, so a movie removed from a playlist on one
+  side stays on the other until you remove it there too.
 
 ## Contributing
 
