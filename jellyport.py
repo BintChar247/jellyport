@@ -21,6 +21,7 @@ import tkinter.font as tkfont
 from tkinter import messagebox, simpledialog, ttk
 
 import jellyport_cli as core
+import theme
 
 APP_NAME = "Jellyport"
 __version__ = core.__version__
@@ -37,6 +38,8 @@ DEFAULT_CONFIG = {
     "jellyfin": {"url": "http://192.168.1.10:8096", "api_key": "", "user": "",
                  "verify_ssl": True},
     "path_mappings": [],
+    "network_paths": [],
+    "theme": "dark",
 }
 
 LARGE_DROP = 300  # ask before adding more than this many items at once
@@ -53,6 +56,8 @@ def load_config():
         for k in ("plex", "jellyfin"):
             cfg[k].update(user.get(k, {}))
         cfg["path_mappings"] = user.get("path_mappings", [])
+        cfg["network_paths"] = user.get("network_paths", [])
+        cfg["theme"] = user.get("theme", "dark")
     return cfg
 
 
@@ -138,7 +143,7 @@ class SettingsDialog(tk.Toplevel):
 
         heading("Path mappings (only if Plex and Jellyfin see the NAS folders differently)")
         ttk.Label(frm, text="One per line:   Plex path  =>  Jellyfin path",
-                  foreground="#666").grid(row=r, column=0, columnspan=2, sticky="w")
+                  foreground=theme.C["muted"]).grid(row=r, column=0, columnspan=2, sticky="w")
         r += 1
         self.maps = tk.Text(frm, height=5, width=60, font=("Consolas", 9))
         self.maps.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(2, 0))
@@ -148,13 +153,41 @@ class SettingsDialog(tk.Toplevel):
             self.maps.insert("1.0", "")
         r += 1
         ttk.Label(frm, text="e.g.  /volume1/video/Movies  =>  /media/movies",
-                  foreground="#666").grid(row=r, column=0, columnspan=2, sticky="w")
+                  foreground=theme.C["muted"]).grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+
+        heading("Open files on this PC (Title Finder: Copy paths / Open folder)")
+        ttk.Label(frm, text="One per line:   Plex path  =>  Windows path.   Leave empty for "
+                            "automatic (/volume1/Share/… → \\\\server\\Share\\…)",
+                  foreground=theme.C["muted"]).grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        self.netmaps = tk.Text(frm, height=3, width=60, font=("Consolas", 9))
+        self.netmaps.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        self.netmaps.insert("1.0", "\n".join(
+            f'{m["server"]}  =>  {m["local"]}' for m in cfg.get("network_paths", [])))
+        r += 1
+        ttk.Label(frm, text=r"e.g.  /volume1/Data  =>  Z:\   or   /volume1  =>  \\mynas",
+                  foreground=theme.C["muted"]).grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+
+        heading("Appearance")
+        self.theme = tk.StringVar(value=cfg.get("theme", "dark"))
+        look = ttk.Frame(frm)
+        look.grid(row=r, column=0, columnspan=2, sticky="w")
+        ttk.Radiobutton(look, text="Jellyport dark", value="dark",
+                        variable=self.theme).pack(side="left")
+        ttk.Radiobutton(look, text="Classic Windows", value="classic",
+                        variable=self.theme).pack(side="left", padx=12)
+        ttk.Label(look, text="(takes effect next time Jellyport starts)",
+                  foreground=theme.C["muted"]).pack(side="left")
         r += 1
 
         btns = ttk.Frame(frm)
         btns.grid(row=r, column=0, columnspan=2, sticky="e", pady=(12, 0))
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(btns, text="Save & Connect", command=self.save).pack(side="right", padx=6)
+        ttk.Button(btns, text="Save & Connect", command=self.save,
+                   style="Accent.TButton").pack(side="right", padx=6)
+        theme.titlebar(self)
 
         self.bind("<Escape>", lambda e: self.destroy())
         self.grab_set()
@@ -175,6 +208,18 @@ class SettingsDialog(tk.Toplevel):
                                      f"Line is missing '=>':\n{line}", parent=self)
                 return
         cfg["path_mappings"] = maps
+        net = []
+        for line in self.netmaps.get("1.0", "end").splitlines():
+            if "=>" in line:
+                a, b = (s.strip() for s in line.split("=>", 1))
+                if a and b:
+                    net.append({"server": a, "local": b})
+            elif line.strip():
+                messagebox.showerror("Open files on this PC",
+                                     f"Line is missing '=>':\n{line}", parent=self)
+                return
+        cfg["network_paths"] = net
+        cfg["theme"] = self.theme.get()
         save_config(cfg)
         self.destroy()
         self.on_save()
@@ -212,7 +257,7 @@ class App:
     # ------------------------------------------------------------------ UI --
     def _build(self):
         r = self.root
-        r.title(f"{APP_NAME} {__version__} — Plex → Jellyfin playlists")
+        r.title(f"{APP_NAME} {__version__} — Plex & Jellyfin playlist manager")
         r.geometry("1250x780")
         r.minsize(900, 550)
 
@@ -221,6 +266,7 @@ class App:
 
         top = ttk.Frame(r, padding=(10, 8))
         top.pack(fill="x")
+        ttk.Label(top, text="◆ Jellyport", style="Brand.TLabel").pack(side="left", padx=(0, 14))
         ttk.Button(top, text="⚙ Settings…", command=self.open_settings).pack(side="left")
         ttk.Button(top, text="⟳ Connect / Refresh", command=self.connect).pack(side="left", padx=6)
         ttk.Button(top, text="🔎 Title Finder…", command=self.open_title_finder).pack(side="left")
@@ -248,7 +294,7 @@ class App:
                                                            expand=True, padx=(4, 0))
         lb = ttk.Frame(lf)
         lb.pack(side="bottom", fill="x", pady=(8, 0))
-        ttk.Label(lb, text="Ctrl/Shift-click to pick several", foreground="#666").pack(side="left")
+        ttk.Label(lb, text="Ctrl/Shift-click to pick several", foreground=theme.C["muted"]).pack(side="left")
         ttk.Button(lb, text="Add selected  →", command=self.add_selected).pack(side="right")
         self.ltree = self._make_tree(lf)
 
@@ -263,12 +309,13 @@ class App:
         rb = ttk.Frame(rf)
         rb.pack(side="bottom", fill="x", pady=(8, 0))
         ttk.Button(rb, text="Discard all pending", command=self.discard_pending).pack(side="left")
-        self.apply_btn = ttk.Button(rb, text="Copy to Jellyfin", command=self.apply_changes)
+        self.apply_btn = ttk.Button(rb, text="Copy to Jellyfin", command=self.apply_changes,
+                                    style="Accent.TButton")
         self.apply_btn.pack(side="right")
-        legend = ttk.Frame(rb)
-        legend.pack(side="right", padx=10)
-        tk.Label(legend, text="■ pending", fg="#1a7f37").pack(side="left")
-        tk.Label(legend, text="■ not found in Jellyfin", fg="#c62828").pack(side="left", padx=6)
+        legend = ttk.Frame(rtop)
+        legend.pack(side="right", padx=4)
+        tk.Label(legend, text="■ pending", fg=theme.C["green"]).pack(side="left")
+        tk.Label(legend, text="■ not found", fg=theme.C["red"]).pack(side="left", padx=6)
         self.rtree = self._make_tree(rf)
 
         # ---- log
@@ -280,8 +327,8 @@ class App:
         self.logw.configure(yscrollcommand=lsb.set)
         lsb.pack(side="right", fill="y")
         self.logw.pack(fill="both", expand=True)
-        self.logw.tag_configure("err", foreground="#c62828")
-        self.logw.tag_configure("ok", foreground="#1a7f37")
+        self.logw.tag_configure("err", foreground=theme.C["red"])
+        self.logw.tag_configure("ok", foreground=theme.C["green"])
 
         # events
         self.ltree.bind("<<TreeviewOpen>>", self._on_left_open)
@@ -310,11 +357,11 @@ class App:
         t.pack(side="left", fill="both", expand=True)
         t.tag_configure("group", font=self.bold)
         t.tag_configure("container", font=self.bold)
-        t.tag_configure("pending", foreground="#1a7f37")
-        t.tag_configure("newpl", foreground="#1a7f37", font=self.bold)
-        t.tag_configure("missing", foreground="#c62828")
-        t.tag_configure("dummy", foreground="#888")
-        t.tag_configure("drop", background="#cfe8ff")
+        t.tag_configure("pending", foreground=theme.C["green"])
+        t.tag_configure("newpl", foreground=theme.C["green"], font=self.bold)
+        t.tag_configure("missing", foreground=theme.C["red"])
+        t.tag_configure("dummy", foreground=theme.C["dim"])
+        t.tag_configure("drop", background=theme.C["drop"])
         return t
 
     def _iid(self):
@@ -377,6 +424,7 @@ class App:
             return
         import sync_window
         self._sync_win = tk.Toplevel(self.root)
+        theme.titlebar(self._sync_win)
         sync_window.SyncWindow(self._sync_win, self)
 
     def open_title_finder(self):
@@ -388,6 +436,7 @@ class App:
             return
         import title_finder  # local import: title_finder imports this module
         self._tf_win = tk.Toplevel(self.root)
+        theme.titlebar(self._tf_win)
         title_finder.TitleFinder(self._tf_win, self.cfg)
 
     def open_settings(self):
@@ -629,7 +678,7 @@ class App:
             self.ghost = tk.Toplevel(self.root)
             self.ghost.overrideredirect(True)
             self.ghost.attributes("-topmost", True)
-            tk.Label(self.ghost, text=f"  ➜ {n} selected  ", bg="#2b6cb0", fg="white",
+            tk.Label(self.ghost, text=f"  ➜ {n} selected  ", bg=theme.C["accent"], fg=theme.C["on_accent"],
                      font=self.bold, padx=4, pady=3).pack()
         self.ghost.geometry(f"+{e.x_root + 14}+{e.y_root + 10}")
         self._highlight(self._drop_target_at(e.x_root, e.y_root))
@@ -920,10 +969,7 @@ def main():
             except tk.TclError:
                 pass
             break
-    try:
-        ttk.Style(root).theme_use("vista")
-    except tk.TclError:
-        pass
+    theme.apply(root, load_config().get("theme", "dark"))
     App(root)
     root.mainloop()
 

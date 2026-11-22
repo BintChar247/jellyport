@@ -19,7 +19,7 @@ Usage:
   python jellyport_cli.py --replace               # rebuild existing playlists
 """
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 import argparse
 import json
@@ -290,7 +290,7 @@ class Jellyfin:
             "ParentId": view_id,
             "Recursive": "true",
             "IncludeItemTypes": types,
-            "Fields": "Path,ProductionYear,SortName",
+            "Fields": "Path,ProductionYear,SortName,ProviderIds,MediaSources,DateCreated",
         })
 
     def playlist_items(self, playlist_id):

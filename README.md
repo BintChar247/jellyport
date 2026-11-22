@@ -5,8 +5,9 @@
 <h1 align="center">Jellyport</h1>
 
 <p align="center">
-  <b>Move your Plex playlists to Jellyfin — with drag and drop.</b><br>
-  Free, open source and runs on Windows. No command line needed.
+  <b>The playlist manager for Plex and Jellyfin.</b><br>
+  Copy, sync and build playlists across both servers, and find any title in your
+  libraries. Free, open source and runs on Windows. No command line needed.
 </p>
 
 <p align="center">
@@ -25,40 +26,53 @@
 
 ---
 
-Moving from Plex to Jellyfin? Your movies come across easily, but your playlists don't.
-Jellyport shows your Plex playlists and libraries next to your Jellyfin playlists,
-so you can pick exactly what you want and drag it over.
+Running Plex and Jellyfin, or moving from one to the other? Your movies come across
+easily, but your playlists don't. Jellyport shows both servers side by side, so you can
+drag playlists across, keep them in sync in either direction, and build new ones from
+anything in your libraries.
 
 ## Features
 
+### Copy playlists with drag and drop
 - **See both sides at once.** Plex playlists and movie libraries are on the left, and
   Jellyfin playlists are on the right.
-- **Drag and drop.** Drag single movies, a selection, or whole playlists.
+- **Drag and drop** single movies, a selection, or whole playlists.
 - **Preview before anything changes.** New items show in green and missing items show
-  in red. Nothing is written to Jellyfin until you click **Copy to Jellyfin**.
-- **Smart matching.** Movies are matched by file path, IMDb, TMDb or TVDb ID, or title
-  and year. This works even when Jellyfin runs in Docker and sees your NAS folders
-  under different paths.
-- **No duplicates.** Movies that are already in a playlist are skipped, so you can run
-  it again safely.
+  in red. Nothing is written until you click **Copy to Jellyfin**.
+
+### ⇄ Sync playlists in either direction
+- Compare same-named playlists on both servers and copy the missing entries
+  **Jellyfin → Plex**, **Plex → Jellyfin**, or **both ways**.
+- Playlists that exist on only one side are created on the other.
+- Sync only adds entries; it never removes anything, so it's safe to run again.
+
+### 🔎 Title Finder
+- **Search all your libraries** on Plex or Jellyfin: **Starts with**, **Contains**,
+  **Does not contain**, **Ends with**, **Regex**, or **Code (ABC-123)** for titles that
+  start with a letter code and a number.
+- **Two filters at once**, joined by **AND** or **OR**, each on the title or the file name.
+- **Group by prefix** lists every first-N-letter prefix with a count.
+- **＋ Create playlist** from the titles you select, on Plex, Jellyfin or both, or add
+  them to an existing playlist.
+- **📂 Open folder** shows a title's file in File Explorer, and **Copy paths** copies
+  Windows-ready network paths (`\\server\Share\…`).
+- **Date added** column (sortable), plus **Export CSV** (opens in Excel) and **Copy titles**.
+
+### 🎨 A dark skin
+- Jellyport has its own dark look with purple and amber accents and dark Windows
+  title bars. Prefer the standard Windows style? Pick **Classic Windows** under
+  **Settings → Appearance**.
+
+### Built to be safe
+- **Smart matching.** Items are matched across servers by file path, IMDb, TMDb or TVDb
+  ID, or title and year. This works even when one server runs in Docker and sees your
+  NAS folders under different paths.
+- **No duplicates and no deletions.** Items already in a playlist are skipped, and
+  Jellyport never removes anything from your playlists.
 - **Your data stays on your network.** Jellyport talks only to your own servers. It
   has no accounts and no tracking.
 - **A command-line version is included** for copying everything in one go or running
   it on a schedule.
-
-### New in 1.1
-
-- **⇄ Sync playlists, in either direction.** Compare same-named playlists on both
-  servers and copy the missing entries **Jellyfin → Plex**, **Plex → Jellyfin**, or
-  **both ways**. Playlists that exist on only one side are created on the other.
-  Sync only ever adds entries; it never removes anything.
-- **🔎 Title Finder.** Search all your Plex or Jellyfin libraries by how titles start,
-  contain or end, or with a regex. A **Code (ABC-123)** mode finds titles that begin
-  with a letter code followed by a number. **Group by prefix** lists every first-N-letter
-  prefix with a count, and results export to CSV (opens in Excel) or the clipboard.
-- **Two filters at once (1.1.1).** Title Finder has a second filter row joined by
-  **AND** or **OR**, and a **Does not contain** option. For example: title contains
-  "Collection" AND does not contain "Trailer".
 
 ## Install
 
@@ -89,6 +103,7 @@ On first launch, the **Settings** window opens.
 | **Jellyfin API key** | **Dashboard → API Keys → +** |
 | **Jellyfin user** | The user who should own the playlists |
 | **Path mappings** | Optional. See below. |
+| **Open files on this PC** | Optional. How Title Finder's **Open folder** and **Copy paths** reach your files, e.g. `/volume1/Data => Z:\`. Leave it empty on Synology to use `\\server\Share\…` automatically. |
 
 ### Path mappings (Docker / NAS users)
 
@@ -142,11 +157,18 @@ Running sync again only adds what's new.
      or **OR** (either can match). Each row can search a different field. Leave the
      second box empty to use one filter, and use **Clear filters** to start again.
 4. Use **Group by prefix** to see every prefix with its count, and click one to list its
-   titles.
-5. Click **Export CSV…** or **Copy titles**. If you select rows first, only those are
-   exported.
+   titles. Click a column header, such as **Date added**, to sort.
+5. Select titles (Ctrl-click or Shift-click), then:
+   - **＋ Create playlist…** to create a playlist on **Plex**, **Jellyfin** or **Both**,
+     or pick an existing playlist to add to. Titles already in it are skipped, and TV
+     shows are left out because playlists hold episodes. Titles from one server are
+     matched on the other automatically.
+   - **📂 Open folder**, or double-click a title, to show its file in File Explorer.
+   - **Copy paths** to copy the files' Windows paths, one per line.
+   - **Copy titles** or **Export CSV…**. With nothing selected, these use every title
+     in the list.
 
-Title Finder only reads from your servers.
+Title Finder only changes your servers when you click **Create** in Create playlist.
 
 ## Command line
 

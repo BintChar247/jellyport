@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import jellyport_cli as core
+import theme
 
 DIRECTIONS = [("Jellyfin → Plex", "to_plex"), ("Plex → Jellyfin", "to_jf"), ("Both ways", "both")]
 
@@ -35,14 +36,14 @@ class SyncWindow:
         ttk.Label(win, text="Playlists are paired by name. Missing playlists are created. "
                             "Nothing is ever removed. Click a row to tick or untick it; "
                             "double-click to see entries that can't be matched.",
-                  foreground="#666", padding=(10, 0)).pack(fill="x")
+                  foreground=theme.C["muted"], padding=(10, 0)).pack(fill="x")
 
         bottom = ttk.Frame(win, padding=(10, 8))
         bottom.pack(side="bottom", fill="x")
         self.summary = tk.StringVar(value="")
         ttk.Label(bottom, textvariable=self.summary).pack(side="left")
         self.go = ttk.Button(bottom, text="Sync ticked playlists", command=self.apply,
-                             state="disabled")
+                             state="disabled", style="Accent.TButton")
         self.go.pack(side="right")
 
         cols = ("tick", "plex", "jf", "add_plex", "add_jf", "missing", "note")
@@ -61,8 +62,8 @@ class SyncWindow:
         t.configure(yscrollcommand=vs.set)
         vs.pack(side="right", fill="y")
         t.pack(fill="both", expand=True)
-        t.tag_configure("work", foreground="#1a7f37")
-        t.tag_configure("idle", foreground="#888")
+        t.tag_configure("work", foreground=theme.C["green"])
+        t.tag_configure("idle", foreground=theme.C["dim"])
         t.bind("<ButtonRelease-1>", self._toggle)
         t.bind("<Double-1>", self._show_missing)
         self.tree = t

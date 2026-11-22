@@ -15,21 +15,26 @@ Run:  python title_finder.py
 """
 
 import csv
+import datetime
 import os
 import queue
 import re
+import subprocess
 import sys
 import threading
+from urllib.parse import urlparse
 import tkinter as tk
 from collections import Counter
 from tkinter import filedialog, messagebox, ttk
 
 import jellyport as jp
 import jellyport_cli as core
+import theme
 
 ALL = "All libraries"
 CODE = "Code (ABC-123)"
 NOT_CONTAINS = "Does not contain"
+COLS = ("title", "year", "type", "library", "added", "file")
 MODES = ["Starts with", CODE, "Contains", NOT_CONTAINS, "Ends with", "Regex"]
 FIELDS = ["Title", "File name"]
 ARTICLES = re.compile(r"^(the|a|an)\s+", re.I)
@@ -49,13 +54,22 @@ def plex_libraries(plex):
     return out
 
 
+def _plex_date(ts):
+    try:
+        return datetime.datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
 def plex_record(x, lib):
     f = ""
     for m in x.get("Media", []) or []:
         for p in m.get("Part", []) or []:
             f = f or p.get("file", "")
     return {"title": x.get("title", ""), "sort": x.get("titleSort") or x.get("title", ""),
-            "year": x.get("year", ""), "type": x.get("type", ""), "library": lib, "file": f}
+            "year": x.get("year", ""), "type": x.get("type", ""), "library": lib, "file": f,
+            "added": _plex_date(x.get("addedAt")),
+            "server": "Plex", "key": str(x.get("ratingKey", "")), "raw": x}
 
 
 def jf_libraries(jf):
@@ -71,7 +85,9 @@ def jf_libraries(jf):
 def jf_record(x, lib):
     return {"title": x.get("Name", ""), "sort": x.get("SortName") or x.get("Name", ""),
             "year": x.get("ProductionYear", ""), "type": (x.get("Type") or "").lower(),
-            "library": lib, "file": x.get("Path", "")}
+            "library": lib, "file": x.get("Path", ""),
+            "added": (x.get("DateCreated") or "")[:10],
+            "server": "Jellyfin", "key": x.get("Id", ""), "raw": x}
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +160,7 @@ class TitleFinder:
         ttk.Button(find, text="Clear filters", command=self.clear_filters).grid(
             row=1, column=5, sticky="w", padx=6, pady=(6, 0))
         ttk.Label(find, text="(leave the second box empty to use one filter)",
-                  foreground="#666").grid(row=1, column=6, sticky="w", padx=6, pady=(6, 0))
+                  foreground=theme.C["muted"]).grid(row=1, column=6, sticky="w", padx=6, pady=(6, 0))
 
         for v in (self.mode, self.text, self.field, self.case, self.skip_articles,
                   self.join, self.mode2, self.text2, self.field2):
@@ -184,17 +200,24 @@ class TitleFinder:
         ttk.Label(bar, textvariable=self.count).pack(side="left")
         ttk.Button(bar, text="Export CSV…", command=self.export).pack(side="right")
         ttk.Button(bar, text="Copy titles", command=self.copy).pack(side="right", padx=6)
-        cols = ("title", "year", "type", "library", "file")
+        ttk.Button(bar, text="Copy paths", command=self.copy_paths).pack(side="right")
+        ttk.Button(bar, text="＋ Create playlist…",
+                   command=self.create_playlist).pack(side="right", padx=(0, 6))
+        ttk.Button(bar, text="📂 Open folder", command=self.open_folder).pack(side="right",
+                                                                            padx=6)
+        cols = COLS
         t = ttk.Treeview(rf, columns=cols, show="headings", selectmode="extended")
         for c, w, txt in (("title", 330, "Title"), ("year", 55, "Year"), ("type", 70, "Type"),
-                          ("library", 140, "Library"), ("file", 360, "File")):
+                          ("library", 140, "Library"), ("added", 105, "Date added"),
+                          ("file", 360, "File")):
             t.heading(c, text=txt, command=lambda c=c: self.sort_by(c))
             t.column(c, width=w, stretch=c in ("title", "file"),
-                     anchor="center" if c == "year" else "w")
+                     anchor="center" if c in ("year", "added") else "w")
         vs = ttk.Scrollbar(rf, orient="vertical", command=t.yview)
         t.configure(yscrollcommand=vs.set)
         vs.pack(side="right", fill="y")
         t.pack(fill="both", expand=True)
+        t.bind("<Double-1>", lambda e: self.open_folder())
         self.tree = t
         self._sort = ("title", False)
 
@@ -242,13 +265,18 @@ class TitleFinder:
             libs = {}
             errors = []
             try:
-                libs["Plex"] = plex_libraries(core.Plex(cfg["plex"]))
+                self.plex = core.Plex(cfg["plex"])
+                libs["Plex"] = plex_libraries(self.plex)
             except Exception as e:  # noqa: BLE001
+                self.plex = None
                 errors.append(f"Plex: {e}")
             try:
-                libs["Jellyfin"] = jf_libraries(core.Jellyfin(cfg["jellyfin"]))
+                self.jf = core.Jellyfin(cfg["jellyfin"])
+                libs["Jellyfin"] = jf_libraries(self.jf)
             except Exception as e:  # noqa: BLE001
+                self.jf = None
                 errors.append(f"Jellyfin: {e}")
+            self._to_plex = self._to_jf = None     # cross-server matchers, built on demand
             return libs, errors
 
         def done(res):
@@ -300,6 +328,7 @@ class TitleFinder:
             if token != self._load_id:     # a newer load was started meanwhile
                 return
             self.items = items
+            self._loaded_server = server
             self.status.set(f"{server} · {pick}: {len(items):,} titles loaded")
             self.group()
             self.apply_filter()
@@ -380,8 +409,11 @@ class TitleFinder:
         rows = sorted(self.shown, key=key, reverse=rev)
         t = self.tree
         t.delete(*t.get_children())
+        self._row_rec = {}
         for r in rows[:20000]:
-            t.insert("", "end", values=(r["title"], r["year"], r["type"], r["library"], r["file"]))
+            iid = t.insert("", "end",
+                           values=tuple(r.get(c, "") for c in COLS))
+            self._row_rec[iid] = r
         more = f" (showing first 20,000)" if len(rows) > 20000 else ""
         if not self.items:
             self.count.set("No titles loaded yet. Pick a server and library; titles load automatically.")
@@ -416,9 +448,86 @@ class TitleFinder:
 
     # -------------------------------------------------------------- output --
     def _selected_or_shown(self):
-        cols = ("title", "year", "type", "library", "file")
+        cols = COLS
         ids = self.tree.selection() or self.tree.get_children()
         return [dict(zip(cols, self.tree.item(i, "values"))) for i in ids]
+
+    # ------------------------------------------------------------ playlist --
+    def create_playlist(self):
+        recs = [self._row_rec[i] for i in self.tree.selection() if i in self._row_rec]
+        if not recs:
+            shown = [self._row_rec[i] for i in self.tree.get_children()]
+            if not shown:
+                messagebox.showinfo("Title Finder", "Nothing to add. Find some titles first.",
+                                    parent=self.root)
+                return
+            if not messagebox.askyesno(
+                    "Create playlist",
+                    f"No titles are selected. Use all {len(shown):,} titles in the list?",
+                    parent=self.root):
+                return
+            recs = shown
+        PlaylistDialog(self, recs)
+
+    # ------------------------------------------------------- local paths --
+    def local_path(self, server_path):
+        """Turn a path as the media server sees it into one Windows can open."""
+        if not server_path:
+            return ""
+        if re.match(r"^[A-Za-z]:[\\/]|^\\\\", server_path):
+            return server_path                       # already a Windows path
+        p = server_path.replace("\\", "/")
+        if getattr(self, "_loaded_server", "Plex") == "Jellyfin":
+            # Jellyfin path -> Plex path via the normal path mappings
+            for m in self.cfg.get("path_mappings", []):
+                jf = m["jellyfin"].rstrip("/")
+                if p.lower() == jf.lower() or p.lower().startswith(jf.lower() + "/"):
+                    p = m["plex"].rstrip("/") + p[len(jf):]
+                    break
+        for m in self.cfg.get("network_paths", []):
+            src = m["server"].rstrip("/")
+            if p.lower() == src.lower() or p.lower().startswith(src.lower() + "/"):
+                local = m["local"].rstrip("\\/")
+                return local + p[len(src):].replace("/", "\\")
+        mo = re.match(r"^/volume\d+/(.+)$", p)      # Synology default
+        host = urlparse(self.cfg["plex"].get("url", "")).hostname
+        if mo and host:
+            return f"\\\\{host}\\" + mo.group(1).replace("/", "\\")
+        return p
+
+    def _selected_paths(self):
+        cols = COLS
+        ids = self.tree.selection()
+        rows = [dict(zip(cols, self.tree.item(i, "values"))) for i in ids]
+        return [self.local_path(r["file"]) for r in rows if r["file"]]
+
+    def copy_paths(self):
+        paths = self._selected_paths()
+        if not paths:
+            messagebox.showinfo("Title Finder", "Select one or more titles that have a file "
+                                "(TV shows don't), then try again.", parent=self.root)
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append("\n".join(paths))
+        self.count.set(f"Copied {len(paths):,} path(s), e.g. {paths[0]}")
+
+    def open_folder(self):
+        paths = self._selected_paths()
+        if not paths:
+            messagebox.showinfo("Title Finder", "Select a title that has a file "
+                                "(TV shows don't), then try again.", parent=self.root)
+            return
+        if len(paths) > 5 and not messagebox.askyesno(
+                "Title Finder", f"Open {len(paths)} Explorer windows?", parent=self.root):
+            return
+        for path in paths[:20]:
+            if sys.platform == "win32":
+                # /select highlights the file inside its folder
+                subprocess.Popen(f'explorer /select,"{path}"')
+            else:
+                subprocess.Popen(["xdg-open" if sys.platform.startswith("linux") else "open",
+                                  os.path.dirname(path)])
+        self.count.set(f"Opened {min(len(paths), 20)} folder(s): {paths[0]}")
 
     def copy(self):
         rows = self._selected_or_shown()
@@ -438,10 +547,196 @@ class TitleFinder:
         if not path:
             return
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=["title", "year", "type", "library", "file"])
+            w = csv.DictWriter(f, fieldnames=list(COLS))
             w.writeheader()
             w.writerows(rows)
         self.count.set(f"Exported {len(rows):,} titles to {path}")
+
+
+# --------------------------------------------------------------------------- #
+# Create / add to playlist
+# --------------------------------------------------------------------------- #
+SHOW_TYPES = {"show", "series"}
+
+
+def _ids_for(tf, recs, target):
+    """Item ids on `target` server for these records -> (ids, unmatched titles)."""
+    ids, missing, seen = [], [], set()
+    for r in recs:
+        if r["server"] == target:
+            key = r["key"]
+        elif target == "Jellyfin":
+            if tf._to_jf is None:
+                tf._to_jf = core.Matcher(tf.jf.library(), tf.cfg.get("path_mappings", []))
+            hit, _ = tf._to_jf.match(r["raw"])
+            key = hit["Id"] if hit else None
+        else:
+            if tf._to_plex is None:
+                tf._to_plex = core.PlexMatcher(tf.plex.library_index(),
+                                               tf.cfg.get("path_mappings", []))
+            hit, _ = tf._to_plex.match(r["raw"])
+            key = str(hit["ratingKey"]) if hit else None
+        if not key:
+            missing.append(r["title"])
+        elif key not in seen:
+            seen.add(key)
+            ids.append(key)
+    return ids, missing
+
+
+def add_records_to_playlist(tf, recs, target, name):
+    """Create playlist `name` on `target`, or add to it if it exists. Never removes."""
+    ids, missing = _ids_for(tf, recs, target)
+    if target == "Plex":
+        pls = {p["title"].lower(): p for p in tf.plex.playlists()}
+        pl = pls.get(name.lower())
+        if pl and pl.get("smart"):
+            raise core.ApiError(f'"{pl["title"]}" is a Plex smart playlist; Plex can\'t add to it.')
+        if pl:
+            have = {str(x["ratingKey"]) for x in tf.plex.playlist_items(pl["ratingKey"])}
+            new = [i for i in ids if i not in have]
+            if new:
+                tf.plex.add_to_playlist(pl["ratingKey"], new)
+            return {"created": False, "added": len(new), "already": len(ids) - len(new),
+                    "missing": missing}
+        if ids:
+            tf.plex.create_playlist(name, ids)
+        return {"created": bool(ids), "added": len(ids), "already": 0, "missing": missing}
+    pls = {p["Name"].lower(): p for p in tf.jf.playlists()}
+    pl = pls.get(name.lower())
+    if pl:
+        have = set(tf.jf.playlist_item_ids(pl["Id"]))
+        new = [i for i in ids if i not in have]
+        if new:
+            tf.jf.add_to_playlist(pl["Id"], new)
+        return {"created": False, "added": len(new), "already": len(ids) - len(new),
+                "missing": missing}
+    if ids:
+        res = tf.jf.create_playlist(name, ids[:100])
+        if len(ids) > 100:
+            tf.jf.add_to_playlist(res["Id"], ids[100:])
+    return {"created": bool(ids), "added": len(ids), "already": 0, "missing": missing}
+
+
+class PlaylistDialog(tk.Toplevel):
+    def __init__(self, tf, recs):
+        super().__init__(tf.root)
+        self.tf = tf
+        self.shows = [r for r in recs if r["type"] in SHOW_TYPES]
+        self.recs = [r for r in recs if r["type"] not in SHOW_TYPES]
+        self.title("Create playlist")
+        self.transient(tf.root)
+        self.resizable(False, False)
+        frm = ttk.Frame(self, padding=14)
+        frm.pack(fill="both", expand=True)
+
+        msg = f"{len(self.recs):,} title(s) selected."
+        if self.shows:
+            msg += (f"\n{len(self.shows):,} TV show(s) left out: playlists hold episodes, "
+                    "not whole shows.")
+        ttk.Label(frm, text=msg).grid(row=0, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(frm, text="Create on:").grid(row=1, column=0, sticky="w", pady=(12, 4))
+        servers = [s for s in ("Plex", "Jellyfin") if getattr(tf, "plex" if s == "Plex" else "jf",
+                                                              None)]
+        self.target = tk.StringVar(value=getattr(tf, "_loaded_server", servers[0]))
+        col = 1
+        for val in servers + (["Both"] if len(servers) == 2 else []):
+            ttk.Radiobutton(frm, text=val, value=val, variable=self.target,
+                            command=self._fill_names).grid(row=1, column=col, sticky="w",
+                                                           pady=(12, 4))
+            col += 1
+
+        ttk.Label(frm, text="Playlist name:").grid(row=2, column=0, sticky="w")
+        self.name = tk.StringVar()
+        self.names = ttk.Combobox(frm, textvariable=self.name, width=40)
+        self.names.grid(row=2, column=1, columnspan=3, sticky="ew")
+        ttk.Label(frm, text="Type a new name, or pick an existing playlist to add to it.\n"
+                            "Titles already in the playlist are skipped; nothing is removed.",
+                  foreground=theme.C["muted"]).grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        if any(r["server"] != self.target.get() for r in self.recs) or len(servers) == 2:
+            ttk.Label(frm, text="Titles are matched on the other server by file path, "
+                                "IMDb/TMDb ID or title + year (the first match can take a "
+                                "few seconds).", foreground=theme.C["muted"], wraplength=430
+                      ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=5, column=0, columnspan=4, sticky="e", pady=(14, 0))
+        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="right")
+        self.ok = ttk.Button(btns, text="Create", command=self.go, style="Accent.TButton")
+        self.ok.pack(side="right", padx=6)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda e: self.go())
+        self.names.focus_set()
+        self._fill_names()
+        theme.titlebar(self)
+        self.grab_set()
+
+    def _targets(self):
+        t = self.target.get()
+        return ["Plex", "Jellyfin"] if t == "Both" else [t]
+
+    def _fill_names(self):
+        tf, targets = self.tf, self._targets()
+
+        def work():
+            names = set()
+            if "Plex" in targets:
+                names |= {p["title"] for p in tf.plex.playlists() if not p.get("smart")}
+            if "Jellyfin" in targets:
+                names |= {p["Name"] for p in tf.jf.playlists()}
+            return sorted(names, key=str.lower)
+
+        def done(names):
+            if self.winfo_exists():
+                self.names["values"] = names
+
+        tf.bg("Loading playlists…", work, done)
+
+    def go(self):
+        name = self.name.get().strip()
+        if not name:
+            messagebox.showinfo("Create playlist", "Enter a playlist name.", parent=self)
+            return
+        if not self.recs:
+            messagebox.showinfo("Create playlist", "There are no titles to add.", parent=self)
+            return
+        tf, recs, targets = self.tf, self.recs, self._targets()
+        self.ok.configure(state="disabled")
+
+        def work():
+            out = {}
+            for t in targets:
+                try:
+                    out[t] = add_records_to_playlist(tf, recs, t, name)
+                except Exception as e:  # noqa: BLE001
+                    out[t] = e
+            return out
+
+        def done(results):
+            lines = []
+            for t, r in results.items():
+                if isinstance(r, Exception):
+                    lines.append(f"{t}: failed: {r}")
+                    continue
+                verb = "created" if r["created"] else "updated"
+                line = f'{t}: "{name}" {verb}, {r["added"]} added'
+                if r["already"]:
+                    line += f', {r["already"]} already there'
+                if r["missing"]:
+                    line += f', {len(r["missing"])} not found on {t}'
+                lines.append(line)
+                for m in r["missing"][:10]:
+                    lines.append(f"    not found: {m}")
+                if len(r["missing"]) > 10:
+                    lines.append(f"    …and {len(r['missing']) - 10} more")
+            if self.winfo_exists():
+                self.destroy()
+            tf.count.set(lines[0] if lines else "")
+            messagebox.showinfo("Create playlist", "\n".join(lines), parent=tf.root)
+
+        tf.bg(f'Adding {len(recs)} title(s) to "{name}"…', work, done,)
+
 
 
 def main():
@@ -459,10 +754,7 @@ def main():
             except tk.TclError:
                 pass
             break
-    try:
-        ttk.Style(root).theme_use("vista")
-    except tk.TclError:
-        pass
+    theme.apply(root, jp.load_config().get("theme", "dark"))
     TitleFinder(root)
     root.mainloop()
 
