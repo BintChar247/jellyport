@@ -29,7 +29,9 @@ import jellyport_cli as core
 
 ALL = "All libraries"
 CODE = "Code (ABC-123)"
-MODES = ["Starts with", CODE, "Contains", "Ends with", "Regex"]
+NOT_CONTAINS = "Does not contain"
+MODES = ["Starts with", CODE, "Contains", NOT_CONTAINS, "Ends with", "Regex"]
+FIELDS = ["Title", "File name"]
 ARTICLES = re.compile(r"^(the|a|an)\s+", re.I)
 
 
@@ -122,21 +124,30 @@ class TitleFinder:
         find = ttk.LabelFrame(r, text=" Find ", padding=8)
         find.pack(fill="x", padx=10)
         self.mode = tk.StringVar(value="Starts with")
-        ttk.Combobox(find, textvariable=self.mode, values=MODES, width=11,
-                     state="readonly").pack(side="left")
         self.text = tk.StringVar()
-        ent = ttk.Entry(find, textvariable=self.text, width=30)
-        ent.pack(side="left", padx=6)
-        ttk.Label(find, text="in").pack(side="left")
         self.field = tk.StringVar(value="Title")
-        ttk.Combobox(find, textvariable=self.field, values=["Title", "File name"], width=9,
-                     state="readonly").pack(side="left", padx=6)
+        self._filter_row(find, 0, self.mode, self.text, self.field)
         self.case = tk.BooleanVar(value=False)
-        ttk.Checkbutton(find, text="Match case", variable=self.case).pack(side="left", padx=6)
+        ttk.Checkbutton(find, text="Match case", variable=self.case).grid(
+            row=0, column=5, sticky="w", padx=6)
         self.skip_articles = tk.BooleanVar(value=False)
-        ttk.Checkbutton(find, text='Ignore "The / A / An"',
-                        variable=self.skip_articles).pack(side="left", padx=6)
-        for v in (self.mode, self.text, self.field, self.case, self.skip_articles):
+        ttk.Checkbutton(find, text='Ignore "The / A / An"', variable=self.skip_articles).grid(
+            row=0, column=6, sticky="w", padx=6)
+
+        self.join = tk.StringVar(value="AND")
+        ttk.Combobox(find, textvariable=self.join, values=["AND", "OR"], width=4,
+                     state="readonly").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=(6, 0))
+        self.mode2 = tk.StringVar(value=NOT_CONTAINS)
+        self.text2 = tk.StringVar()
+        self.field2 = tk.StringVar(value="Title")
+        self._filter_row(find, 1, self.mode2, self.text2, self.field2)
+        ttk.Button(find, text="Clear filters", command=self.clear_filters).grid(
+            row=1, column=5, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(find, text="(leave the second box empty to use one filter)",
+                  foreground="#666").grid(row=1, column=6, sticky="w", padx=6, pady=(6, 0))
+
+        for v in (self.mode, self.text, self.field, self.case, self.skip_articles,
+                  self.join, self.mode2, self.text2, self.field2):
             v.trace_add("write", lambda *a: self._schedule_filter())
 
         body = ttk.PanedWindow(r, orient="horizontal")
@@ -296,8 +307,22 @@ class TitleFinder:
         self.bg(f"Loading {pick} from {server}…", work, done)
 
     # -------------------------------------------------------------- filter --
-    def _subject(self, rec):
-        if self.field.get() == "File name":
+    def _filter_row(self, parent, row, mode, text, field):
+        pad = (6, 0) if row else 0
+        ttk.Combobox(parent, textvariable=mode, values=MODES, width=15,
+                     state="readonly").grid(row=row, column=1, sticky="w", pady=pad)
+        ttk.Entry(parent, textvariable=text, width=30).grid(row=row, column=2, padx=6, pady=pad)
+        ttk.Label(parent, text="in").grid(row=row, column=3, pady=pad)
+        ttk.Combobox(parent, textvariable=field, values=FIELDS, width=9,
+                     state="readonly").grid(row=row, column=4, padx=6, pady=pad)
+
+    def clear_filters(self):
+        self.text.set("")
+        self.text2.set("")
+        self.groups.selection_remove(self.groups.selection())
+
+    def _subject(self, rec, field=None):
+        if (field or self.field.get()) == "File name":
             return core.basename(rec["file"]) if rec["file"] else ""
         s = rec["title"]
         if self.skip_articles.get():
@@ -309,23 +334,38 @@ class TitleFinder:
             self.root.after_cancel(self._after)
         self._after = self.root.after(250, self.apply_filter)
 
-    def apply_filter(self):
-        self._after = None
-        text, mode, case = self.text.get(), self.mode.get(), self.case.get()
+    def _predicate(self, mode, text, field):
+        """A test(record) -> bool for one filter row, or None if the row is empty."""
+        if not text:
+            return None
+        case = self.case.get()
         if mode in ("Regex", CODE):
             pattern = text if mode == "Regex" else rf"^{re.escape(text)}[\s\-_.]*\d"
-            try:
-                rx = re.compile(pattern, 0 if case else re.I)
-            except re.error as e:
-                self.count.set(f"Regex error: {e}")
-                return
-            test = lambda s: bool(rx.search(s))
+            rx = re.compile(pattern, 0 if case else re.I)   # re.error handled by caller
+            return lambda r: bool(rx.search(self._subject(r, field)))
+        needle = text if case else text.lower()
+        fn = {"Starts with": str.startswith, "Contains": str.__contains__,
+              "Ends with": str.endswith,
+              NOT_CONTAINS: lambda s, n: n not in s}[mode]
+        return lambda r: fn(self._subject(r, field) if case
+                            else self._subject(r, field).lower(), needle)
+
+    def apply_filter(self):
+        self._after = None
+        try:
+            t1 = self._predicate(self.mode.get(), self.text.get(), self.field.get())
+            t2 = self._predicate(self.mode2.get(), self.text2.get(), self.field2.get())
+        except re.error as e:
+            self.count.set(f"Regex error: {e}")
+            return
+        if t1 and t2:
+            if self.join.get() == "OR":
+                test = lambda r: t1(r) or t2(r)
+            else:
+                test = lambda r: t1(r) and t2(r)
         else:
-            needle = text if case else text.lower()
-            fn = {"Starts with": str.startswith, "Contains": str.__contains__,
-                  "Ends with": str.endswith}[mode]
-            test = lambda s: fn(s if case else s.lower(), needle)
-        self.shown = [r for r in self.items if not text or test(self._subject(r))]
+            test = t1 or t2
+        self.shown = [r for r in self.items if not test or test(r)]
         self._render()
 
     def sort_by(self, col):

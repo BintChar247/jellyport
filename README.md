@@ -56,6 +56,9 @@ so you can pick exactly what you want and drag it over.
   contain or end, or with a regex. A **Code (ABC-123)** mode finds titles that begin
   with a letter code followed by a number. **Group by prefix** lists every first-N-letter
   prefix with a count, and results export to CSV (opens in Excel) or the clipboard.
+- **Two filters at once (1.1.1).** Title Finder has a second filter row joined by
+  **AND** or **OR**, and a **Does not contain** option. For example: title contains
+  "Collection" AND does not contain "Trailer".
 
 ## Install
 
@@ -133,7 +136,11 @@ Running sync again only adds what's new.
 1. Click **🔎 Title Finder…** in the toolbar.
 2. Pick a server and a library (or **All libraries**). Titles load automatically.
 3. Type in **Find** and choose **Starts with**, **Code (ABC-123)**, **Contains**,
-   **Ends with** or **Regex**. You can search the title or the file name.
+   **Does not contain**, **Ends with** or **Regex**. You can search the title or the
+   file name.
+   - To narrow it down, fill in the second row too and pick **AND** (both must match)
+     or **OR** (either can match). Each row can search a different field. Leave the
+     second box empty to use one filter, and use **Clear filters** to start again.
 4. Use **Group by prefix** to see every prefix with its count, and click one to list its
    titles.
 5. Click **Export CSV…** or **Copy titles**. If you select rows first, only those are
